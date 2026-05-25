@@ -1,0 +1,33 @@
+{
+  "name": "com.ericmay256.hss",
+  "version": "0.1.0",
+  "displayName": "High Score Server",
+  "description": "SDK for High Score Server API",
+  "unity": "6000.3",
+  "samples": [
+    {
+      "displayName": "Basic Usage",
+      "description": "Example scene (TBD) and script demonstrating basic usage for guest auth, score submit, score fetch, and claim flow.",
+      "path": "Samples~/BasicUsage"
+    }
+  ],
+  "author": {
+    "name": "Eric May",
+    "url": "https://github.com/EricMay256"
+  },
+  "keywords": [
+    "unity",
+    "unity3d",
+    "upm",
+    "leaderboard",
+    "highscore",
+    "backend",
+    "api",
+    "networking",
+    "game-services"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "com.unity.nuget.newtonsoft-json": "3.2.2"
+  }
+}
