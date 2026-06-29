@@ -313,18 +313,29 @@ namespace UBear.Leaderboard
     }
 
     /// <summary>
-    /// Submits a score for the authenticated user.
-    /// The server upserts — if the player already has a better score,
-    /// their existing record is preserved and returned.
+    /// Submits a raw score for the authenticated user (mode tier 0).
+    /// The server upserts — for "best" modes, if the player already has a better
+    /// score their existing record is preserved and returned.
     /// Requires a stored access token.
+    ///
+    /// idempotencyKey is required for cumulative game modes (the server returns
+    /// HTTP 422 without it) and is the dedup key for the increment; pass null for
+    /// raw/best modes. Submitting to a run-required mode (RequiredTier &gt;= 1)
+    /// returns ApiErrorKind.WrongEndpoint — use SubmitRun instead.
     /// </summary>
   public IEnumerator SubmitScore(
     long                             score,
     string                           gameMode,
-    Action<ApiResult<ScoreResponse>> callback)
+    Action<ApiResult<ScoreResponse>> callback,
+    string                           idempotencyKey = null)
   {
     string url  = $"{_config.BaseUrl}/api/leaderboard/scores";
-    var    body = new ScoreSubmission { Score = score, GameMode = gameMode };
+    var    body = new ScoreSubmission
+    {
+      Score          = score,
+      GameMode       = gameMode,
+      IdempotencyKey = idempotencyKey,
+    };
     // allowGuestFallback: true — for a guest, an unrecoverable 401 must not block
     // a score submission. Falls through to a new guest account before retrying.
     // For a claimed user, the fallback is skipped at runtime (we check is_guest
@@ -332,6 +343,36 @@ namespace UBear.Leaderboard
     // 401 they can handle with a re-login prompt.
     yield return Post<ScoreSubmission, ScoreResponse>(
       url, body, callback,
+      requiresAuth: true,
+      allowGuestFallback: true);
+  }
+
+  /// <summary>
+  /// Submits a full run for server-side validation on a run-required game mode
+  /// (one the server reports with RequiredTier &gt;= 1). The server validates the
+  /// run, computes the canonical score, writes it to the leaderboard, and returns
+  /// it as a ScoreResponse with Validated=true and ValidationTier set to the tier
+  /// actually achieved. Requires a stored access token.
+  ///
+  /// Use this instead of SubmitScore for run-required modes; submitting a raw
+  /// score there returns ApiErrorKind.WrongEndpoint, and conversely submitting a
+  /// run to a raw-only mode (RequiredTier 0) does the same — in both cases the
+  /// result's SubmitTo names the correct endpoint.
+  ///
+  /// RunSubmission.ClientRunId provides anti-replay/idempotency: resubmitting a
+  /// run with the same ClientRunId returns the prior result without re-validating.
+  /// The client's ClaimedScore is recorded but never authoritative.
+  /// </summary>
+  public IEnumerator SubmitRun(
+    RunSubmission                    run,
+    Action<ApiResult<ScoreResponse>> callback)
+  {
+    string url = $"{_config.BaseUrl}/api/leaderboard/runs";
+    // allowGuestFallback mirrors SubmitScore: a guest's recoverable 401 shouldn't
+    // drop a run. Run-required modes that also set requires_claimed_account will
+    // still 403 a guest — that surfaces cleanly to the caller.
+    yield return Post<RunSubmission, ScoreResponse>(
+      url, run, callback,
       requiresAuth: true,
       allowGuestFallback: true);
   }
@@ -454,7 +495,27 @@ namespace UBear.Leaderboard
     // HTTP error (4xx/5xx) — UnityWebRequest reports these as ProtocolError
     if (request.result == UnityWebRequest.Result.ProtocolError)
     {
-      string detail = TryExtractDetail(request.downloadHandler?.text);
+      string body   = request.downloadHandler?.text;
+      string detail = TryExtractDetail(body);
+
+      // Cross-route 409: the server returns {detail, code, submit_to} when a
+      // submission hit the wrong endpoint for its mode's tier. Classify it
+      // distinctly so callers can route on ErrorKind/SubmitTo instead of the
+      // generic Conflict bucket.
+      if (status == 409)
+      {
+        (string code, string submitTo) = TryExtractCrossRoute(body);
+        if (!string.IsNullOrEmpty(code) && !string.IsNullOrEmpty(submitTo))
+        {
+          string crMessage = string.IsNullOrEmpty(detail)
+              ? $"Wrong endpoint for this game mode; submit to {submitTo} instead."
+              : detail;
+          return ApiResult<T>.Fail(
+              crMessage, ApiErrorKind.WrongEndpoint, (int)status,
+              errorCode: code, submitTo: submitTo);
+        }
+      }
+
       string message = string.IsNullOrEmpty(detail)
           ? $"Request failed ({status}): {request.error}"
           : $"Request failed ({status}): {detail}";
@@ -536,6 +597,26 @@ namespace UBear.Leaderboard
       return detail.ToString();
     }
     catch { return null; }
+  }
+
+  /// <summary>
+  /// Extracts the machine-routable (code, submit_to) pair from a cross-route
+  /// 409 body. The server emits these as top-level siblings of `detail`:
+  /// {"detail": "...", "code": "RUN_REQUIRED", "submit_to": "/api/leaderboard/runs"}.
+  /// Returns (null, null) for any body that isn't a cross-route error.
+  /// </summary>
+  private static (string code, string submitTo) TryExtractCrossRoute(string json)
+  {
+    if (string.IsNullOrEmpty(json)) return (null, null);
+    try
+    {
+      JToken root = JToken.Parse(json);
+      if (root.Type != JTokenType.Object) return (null, null);
+      string code     = root["code"]?.Value<string>();
+      string submitTo = root["submit_to"]?.Value<string>();
+      return (code, submitTo);
+    }
+    catch { return (null, null); }
   }
 
   /// <summary>

@@ -1,6 +1,6 @@
 # HSS-Unity
 
-Unity SDK for High Score Server (HSS), providing authentication, guest-to-claimed account flows, and leaderboard API integration for games.
+Unity SDK for [High Score Server (HSS)](https://github.com/EricMay256/HighScoreServer), providing authentication, guest-to-claimed account flows, and leaderboard API integration for games.
 
 ## Installation
 
@@ -9,7 +9,7 @@ Add to your project's `Packages/manifest.json`:
 ```json
 {
   "dependencies": {
-    "com.ericmay256.hss": "https://github.com/EricMay256/hss-unity.git#v0.1.0"
+    "com.ericmay256.hss": "https://github.com/EricMay256/hss-unity.git#v0.2.0"
   }
 }
 ```

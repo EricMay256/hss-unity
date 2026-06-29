@@ -1,6 +1,6 @@
 {
   "name": "com.ericmay256.hss",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "displayName": "High Score Server",
   "description": "SDK for High Score Server API",
   "unity": "6000.3",
